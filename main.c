@@ -256,7 +256,7 @@ void create(char *filename, int size) {
     }
 
     dir_record *records = (dir_record *) (&data_blocks[inode_blocks[ROOT_DIR_INUM].dptr]);
-    for (int i = 0; i < records; i++) {
+    for (int i = 0; i < NUM_MAX_FILES; i++) {
         if (records[i].inum == 0) {
             records[i].inum = inum;
             records[i].name[0] = filename[0];
