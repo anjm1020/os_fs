@@ -74,7 +74,7 @@ int main(int argc, char **argv) {
     while (!feof(input)) {
         fgets(buf, 1024, input);
         char *filename, *command, *size;
-        filename = strtok(input, " ");
+        filename = strtok(buf, " ");
         command = strtok(NULL, " ");
 
         if (strcmp(command, "w")) {
