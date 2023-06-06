@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 const int BLOCK_SIZE = 512;
@@ -63,22 +64,32 @@ void create(char *filename, int size);
 
 void delete(char *filename);
 
-int main(int argc, char** argv) {
+int main(int argc, char **argv) {
+
+    if (argc != 2) exit(1);
+
+    FILE *input = fopen(argv[1], "r");
+
+    char buf[1024];
+    while (!feof(input)) {
+        fgets(buf, 1024, input);
+        char *filename, *command, *size;
+        filename = strtok(input, " ");
+        command = strtok(NULL, " ");
+
+        if (strcmp(command, "w")) {
+            size = strtok(NULL, " ");
+            write(filename, atoi(size));
+        } else if(strcmp(command,"r")) {
+            size = strtok(NULL, " ");
+            write(filename, atoi(size));
+        } else {
+            delete(filename);
+        }
+    }
 
     disk_init();
-    write("Aa", 500);
-    write("bb", 500);
-    delete("bb");
-    write("cc", 600);
-    write("Aa", 40);
-    read("Aa", 5);
-    read("bb", 10);
     return 0;
-}
-
-void print() {
-    // print inode
-    // print bitmap
 }
 
 void read(char *filename, int size) {
@@ -171,7 +182,7 @@ void write(char *filename, int size) {
                     size_count--;
                 }
 
-                if(!size_count && base + idx != BLOCK_SIZE)
+                if (!size_count && base + idx != BLOCK_SIZE)
                     (*block)[base + idx] = 0;
             }
 
@@ -194,7 +205,7 @@ void write(char *filename, int size) {
                 data_block (*block) = &data_blocks[dptr_list[base + i]];
                 for (int j = 0; j < BLOCK_SIZE && size_count; j++, size_count--)
                     (*block)[j] = filename[0];
-                if(i==mc-1 && size%BLOCK_SIZE!=0)
+                if (i == mc - 1 && size % BLOCK_SIZE != 0)
                     (*block)[size % BLOCK_SIZE] = 0;
             }
         }
@@ -263,7 +274,7 @@ void create(char *filename, int size) {
 
         for (int i = 0; i < size; i++)
             (*block)[i] = filename[0];
-        if(size!=BLOCK_SIZE) (*block)[size] = 0;
+        if (size != BLOCK_SIZE) (*block)[size] = 0;
     } else {
         inode_blocks[inum].iptr = add_on_bitmap(&data_bitmap);
         unsigned int *dptr_list = (unsigned int *) (&data_blocks[inode_blocks[inum].iptr]);
@@ -273,7 +284,7 @@ void create(char *filename, int size) {
             data_block *curr_block = &data_blocks[dptr_list[i]];
             for (int j = 0; j < BLOCK_SIZE && size_count; j++, size_count--)
                 (*curr_block)[j] = filename[0];
-            if(i==required_size-1 && size%BLOCK_SIZE!=0)
+            if (i == required_size - 1 && size % BLOCK_SIZE != 0)
                 (*curr_block)[size % BLOCK_SIZE] = 0;
         }
     }
