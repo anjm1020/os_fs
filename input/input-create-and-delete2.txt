@@ -1,0 +1,9 @@
+Aa w 20
+KU w 8192
+KU w 4096
+Ka w 8192
+Ka w 8192
+Bb w 20
+Aa r 1
+Aa d
+Bb w 20

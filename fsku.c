@@ -46,18 +46,31 @@ inode *inode_blocks;
 data_block *data_blocks;
 
 void disk_init();
+
 void mark_on_bitmap(bitmap *bm, int idx);
+
 void unmark_on_bitmap(bitmap *bm, int idx);
+
 int get_on_bitmap(bitmap *bm, int idx);
+
 int add_on_bitmap(bitmap *bm);
+
 void delete_on_bitmap(bitmap *bm, char inum);
+
 int free_count(bitmap *bm);
+
 void read(char *filename, int size);
+
 void write(char *filename, int size);
+
 int more_block_count(char inum, int size);
+
 void create(char *filename, int size);
+
 void delete(char *filename);
+
 void print_disk2hex();
+
 void print_char2hex(char c);
 
 int main(int argc, char **argv) {
@@ -77,6 +90,9 @@ int main(int argc, char **argv) {
         filename = strtok(buf, " ");
         command = strtok(NULL, " ");
 
+        if(!strcmp(filename,"dj")) {
+            printf("");
+        }
         if (strcmp(command, "w") == 0) {
             size = strtok(NULL, " ");
             write(filename, atoi(size));
@@ -171,7 +187,7 @@ void write(char *filename, int size) {
             int base = 0;
             int idx = 0;
 
-            if (curr_inode->dptr) {
+            if (!curr_inode->iptr) {
                 data_block *block = &data_blocks[curr_inode->dptr];
 
                 while ((*block)[base] != 0) base++;
@@ -187,12 +203,9 @@ void write(char *filename, int size) {
             }
 
             if (!size_count) return;
-            if (base + idx == BLOCK_SIZE) {
+
+            if (!curr_inode->iptr) {
                 curr_inode->iptr = add_on_bitmap(&data_bitmap);
-                unsigned int *dptr_list = (unsigned int *) (&data_blocks[curr_inode->iptr]);
-                dptr_list[0] = curr_inode->dptr;
-                curr_inode->dptr = 0;
-                mc--;
             }
 
             unsigned int *dptr_list = (unsigned int *) (&data_blocks[curr_inode->iptr]);
@@ -217,24 +230,25 @@ int more_block_count(char inum, int size) {
     unsigned int dptr = curr_inode->dptr;
     unsigned int iptr = curr_inode->iptr;
     unsigned int blocks = curr_inode->blocks;
-    if (iptr) {
-        unsigned int *dptr_list = (unsigned int *) (&data_blocks[iptr]);
 
-        int idx_last_block = -1;
-        while (dptr_list[idx_last_block + 1] != 0 && idx_last_block < blocks) idx_last_block++;
+    int res;
+    int dp_cnt = 0;
+    while (data_blocks[dptr][dp_cnt] != 0) dp_cnt++;
 
-        int cnt = 0;
-        while (data_blocks[idx_last_block][cnt] != 0) cnt++;
+    if (BLOCK_SIZE >= size + dp_cnt) return 0;
+    else {
+        if (iptr) {
+            int idx_last_block = blocks - 3;
 
-        if (BLOCK_SIZE >= size + cnt) return 0;
-        else return ((size - (BLOCK_SIZE - cnt)) / BLOCK_SIZE) + 1;
-    } else {
-        int cnt = 0;
-        while (data_blocks[dptr][cnt] != 0) cnt++;
+            int ip_cnt = 0;
+            while (data_blocks[idx_last_block][ip_cnt] != 0) ip_cnt++;
 
-        if (BLOCK_SIZE > size + cnt) return 0;
-        else if (BLOCK_SIZE == size + cnt) return 1;
-        else return ((size - (BLOCK_SIZE - cnt)) / BLOCK_SIZE) + 2;
+            if (BLOCK_SIZE >= size + ip_cnt) return 0;
+            else return ((size - (BLOCK_SIZE - ip_cnt)) / BLOCK_SIZE) + 1;
+        } else {
+            // 넘어가는데 Iptr 없음
+            return ((size - (BLOCK_SIZE - dp_cnt)) / BLOCK_SIZE) + 2;
+        }
     }
 }
 
@@ -246,7 +260,9 @@ void create(char *filename, int size) {
         return;
     }
 
+    // 딱 나눠 떨어지는 경우를 고려하지 않음
     int required_blocks = (size / BLOCK_SIZE) + 1;
+    if(size%BLOCK_SIZE==0) required_blocks--;
     if (required_blocks != 1) required_blocks++; // block for iptr
     int fc = free_count(&data_bitmap);
 
@@ -327,6 +343,8 @@ void delete(char *filename) {
         }
         delete_on_bitmap(&data_bitmap, iptr);
     }
+
+    delete_on_bitmap(&inode_bitmap, inum);
 }
 
 void disk_init() {
@@ -362,7 +380,8 @@ void mark_on_bitmap(bitmap *bm, int idx) {
 
     int base = idx / 8;
     int offset = idx % 8;
-    bm->map[base] = (bm->map[base] | 1 << (7-offset));
+
+    bm->map[base] = (bm->map[base] | 1 << (7 - offset));
 }
 
 void unmark_on_bitmap(bitmap *bm, int idx) {
@@ -370,14 +389,14 @@ void unmark_on_bitmap(bitmap *bm, int idx) {
     int base = idx / 8;
     int offset = idx % 8;
 
-    bm->map[base] = bm->map[base] & !(0x00 | 1 << (7-offset));
+    bm->map[base] = bm->map[base] & ~(0x00 | (1 << (7 - offset)));
 }
 
-int get_on_bitmap(bitmap* bm, int idx) {
+int get_on_bitmap(bitmap *bm, int idx) {
     int base = idx / 8;
     int offset = idx % 8;
 
-    return bm->map[base] & (1 << (7-offset));
+    return bm->map[base] & (1 << (7 - offset));
 }
 
 int add_on_bitmap(bitmap *bm) {
@@ -411,7 +430,7 @@ void delete_on_bitmap(bitmap *bm, char idx) {
 int free_count(bitmap *bm) {
     int res = 0;
     for (int i = 0; i < bm->size; i++) {
-        if (!get_on_bitmap(bm,i)) res++;
+        if (!get_on_bitmap(bm, i)) res++;
     }
     return res;
 }
@@ -421,7 +440,6 @@ void print_disk2hex() {
     int brFlag = (BLOCK_SIZE / 16);
     for (int i = 0; i < NUM_BLOCK; i++) {
         printf("=====BLOCK %d=====\n", i);
-        if(i==1);
         for (int j = 0; j < BLOCK_SIZE; j++) {
             print_char2hex(disk[i][j]);
             if (j % brFlag == brFlag - 1) printf("\n");
@@ -431,7 +449,7 @@ void print_disk2hex() {
 
 void print_char2hex(char c) {
     const char hexDigits[] = "0123456789ABCDEF";
-    unsigned char uc = (unsigned char)c;
+    unsigned char uc = (unsigned char) c;
 
     unsigned char upperNibble = (uc >> 4) & 0xF;
     unsigned char lowerNibble = uc & 0xF;
