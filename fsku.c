@@ -45,50 +45,51 @@ bitmap data_bitmap;
 inode *inode_blocks;
 data_block *data_blocks;
 
-
 void disk_init();
-
+void mark_on_bitmap(bitmap *bm, int idx);
+void unmark_on_bitmap(bitmap *bm, int idx);
+int get_on_bitmap(bitmap *bm, int idx);
 int add_on_bitmap(bitmap *bm);
-
 void delete_on_bitmap(bitmap *bm, char inum);
-
 int free_count(bitmap *bm);
-
 void read(char *filename, int size);
-
 void write(char *filename, int size);
-
 int more_block_count(char inum, int size);
-
 void create(char *filename, int size);
-
 void delete(char *filename);
+void print_disk2hex();
+void print_char2hex(char c);
 
 int main(int argc, char **argv) {
 
-    if (argc != 2) exit(1);
-
+    char buf[1024];
     FILE *input = fopen(argv[1], "r");
 
-    char buf[1024];
-    while (!feof(input)) {
-        fgets(buf, 1024, input);
+    if (input == NULL) {
+        perror("failed :");
+        exit(1);
+    }
+
+    disk_init();
+
+    while (fgets(buf, 1024, input) != NULL) {
         char *filename, *command, *size;
         filename = strtok(buf, " ");
         command = strtok(NULL, " ");
 
-        if (strcmp(command, "w")) {
+        if (strcmp(command, "w") == 0) {
             size = strtok(NULL, " ");
             write(filename, atoi(size));
-        } else if(strcmp(command,"r")) {
+        } else if (strcmp(command, "r") == 0) {
             size = strtok(NULL, " ");
-            write(filename, atoi(size));
+            read(filename, atoi(size));
         } else {
             delete(filename);
         }
     }
 
-    disk_init();
+    fclose(input);
+    print_disk2hex();
     return 0;
 }
 
@@ -113,20 +114,19 @@ void read(char *filename, int size) {
     unsigned int fsize = curr.fsize;
     unsigned int blocks = curr.blocks;
 
-    printf("dptr=%d, iptr=%d, fsize=%d, blocks=%d\n", dptr, iptr, fsize, blocks);
-
     int read_size = size > fsize ? fsize : size;
 
-    if (iptr) {
+    int idx = 0;
+    while (idx < BLOCK_SIZE && idx < read_size) {
+        printf("%c", data_blocks[dptr][idx++]);
+    }
+
+    if (idx != read_size) {
         unsigned int *list = (unsigned int *) (&data_blocks[iptr]);
         int size_count = read_size;
         for (int i = 0; i < blocks - 1 && size_count; i++) {
             for (int j = 0; j < BLOCK_SIZE && size_count; j++, size_count--)
                 printf("%c", data_blocks[list[i]][j]);
-        }
-    } else {
-        for (int i = 0; i < read_size; i++) {
-            printf("%c", data_blocks[dptr][i]);
         }
     }
 
@@ -246,10 +246,11 @@ void create(char *filename, int size) {
         return;
     }
 
-    int required_size = (size / BLOCK_SIZE) + 1;
+    int required_blocks = (size / BLOCK_SIZE) + 1;
+    if (required_blocks != 1) required_blocks++; // block for iptr
     int fc = free_count(&data_bitmap);
 
-    if (fc < required_size) {
+    if (fc < required_blocks) {
         delete_on_bitmap(&inode_bitmap, inum);
         printf("No space\n");
         return;
@@ -266,25 +267,30 @@ void create(char *filename, int size) {
     }
 
     inode_blocks[inum].fsize = size;
-    inode_blocks[inum].blocks = required_size;
+    inode_blocks[inum].blocks = required_blocks;
 
-    if (required_size == 1) {
-        inode_blocks[inum].dptr = add_on_bitmap(&data_bitmap);
-        data_block *block = &data_blocks[inode_blocks[inum].dptr];
+    inode_blocks[inum].dptr = add_on_bitmap(&data_bitmap);
+    data_block *block = &data_blocks[inode_blocks[inum].dptr];
 
-        for (int i = 0; i < size; i++)
-            (*block)[i] = filename[0];
-        if (size != BLOCK_SIZE) (*block)[size] = 0;
-    } else {
+
+    if (size % BLOCK_SIZE != 0) (*block)[size] = 0;
+
+    int idx = 0;
+    while (size && idx < BLOCK_SIZE) {
+        (*block)[idx++] = filename[0];
+        size--;
+    }
+
+    if (size) {
         inode_blocks[inum].iptr = add_on_bitmap(&data_bitmap);
         unsigned int *dptr_list = (unsigned int *) (&data_blocks[inode_blocks[inum].iptr]);
         int size_count = size;
-        for (int i = 0; i < required_size; i++) {
+        for (int i = 0; i < required_blocks - 2; i++) {
             dptr_list[i] = add_on_bitmap(&data_bitmap);
             data_block *curr_block = &data_blocks[dptr_list[i]];
             for (int j = 0; j < BLOCK_SIZE && size_count; j++, size_count--)
                 (*curr_block)[j] = filename[0];
-            if (i == required_size - 1 && size % BLOCK_SIZE != 0)
+            if (i == required_blocks - 3 && inode_blocks[inum].fsize % BLOCK_SIZE != 0)
                 (*curr_block)[size % BLOCK_SIZE] = 0;
         }
     }
@@ -316,13 +322,11 @@ void delete(char *filename) {
 
     if (iptr) {
         unsigned int *dptr_list = (unsigned int *) (&data_blocks[iptr]);
-        for (int i = 0; i < curr.blocks - 1; i++) {
+        for (int i = 0; i < curr.blocks - 2; i++) {
             delete_on_bitmap(&data_bitmap, dptr_list[i]);
         }
+        delete_on_bitmap(&data_bitmap, iptr);
     }
-
-    // 남아있는 메모리에 대해서는 어떻게 관리할건가
-    // 일단 create 할 때 0 해서 충돌나지 않도록 최적화
 }
 
 void disk_init() {
@@ -354,15 +358,39 @@ void disk_init() {
     }
 }
 
+void mark_on_bitmap(bitmap *bm, int idx) {
+
+    int base = idx / 8;
+    int offset = idx % 8;
+    bm->map[base] = (bm->map[base] | 1 << (7-offset));
+}
+
+void unmark_on_bitmap(bitmap *bm, int idx) {
+
+    int base = idx / 8;
+    int offset = idx % 8;
+
+    bm->map[base] = bm->map[base] & !(0x00 | 1 << (7-offset));
+}
+
+int get_on_bitmap(bitmap* bm, int idx) {
+    int base = idx / 8;
+    int offset = idx % 8;
+
+    return bm->map[base] & (1 << (7-offset));
+}
+
 int add_on_bitmap(bitmap *bm) {
 
     if (bm->last == bm->size) return -1;
 
     int last = bm->last;
-    bm->map[last] = 1;
+
+    mark_on_bitmap(bm, last);
+//    bm->map[last] = 1;
 
     for (int i = 0; i < bm->size; i++) {
-        if (!bm->map[i]) {
+        if (!get_on_bitmap(bm, i)) {
             bm->last = i;
             break;
         }
@@ -375,14 +403,44 @@ int add_on_bitmap(bitmap *bm) {
 }
 
 void delete_on_bitmap(bitmap *bm, char idx) {
-    bm->map[idx] = 0;
+//    bm->map[idx] = 0;
+    unmark_on_bitmap(bm, idx);
     bm->last = idx;
 }
 
 int free_count(bitmap *bm) {
     int res = 0;
     for (int i = 0; i < bm->size; i++) {
-        if (!bm->map[i]) res++;
+        if (!get_on_bitmap(bm,i)) res++;
     }
     return res;
 }
+
+void print_disk2hex() {
+
+    int brFlag = (BLOCK_SIZE / 16);
+    for (int i = 0; i < NUM_BLOCK; i++) {
+        printf("=====BLOCK %d=====\n", i);
+        if(i==1);
+        for (int j = 0; j < BLOCK_SIZE; j++) {
+            print_char2hex(disk[i][j]);
+            if (j % brFlag == brFlag - 1) printf("\n");
+        }
+    }
+}
+
+void print_char2hex(char c) {
+    const char hexDigits[] = "0123456789ABCDEF";
+    unsigned char uc = (unsigned char)c;
+
+    unsigned char upperNibble = (uc >> 4) & 0xF;
+    unsigned char lowerNibble = uc & 0xF;
+
+    char hex[3];
+    hex[0] = hexDigits[upperNibble];
+    hex[1] = hexDigits[lowerNibble];
+    hex[2] = '\0';
+
+    printf("%s", hex);
+}
+
